@@ -37,7 +37,7 @@ class Product(db.Model):
     name = db.Column(db.String(120), nullable=False)
     price = db.Column(db.Float, nullable=False)
     available_quantity = db.Column(db.Integer, nullable=False, default=0)
-    version = db.Column(db.Integer, nullable=False, default=1) 
+    version = db.Column(db.Integer, nullable=False, default=1)
 
     cart_items = db.relationship(
         "CartItem", back_populates="product", cascade="all, delete-orphan"

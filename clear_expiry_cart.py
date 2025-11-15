@@ -6,6 +6,7 @@ import time
 
 IST = ZoneInfo("Asia/Kolkata")
 
+
 def clear_expired_carts(max_retries=5, retry_delay=1):
     """Deletes expired carts safely, retrying if SQLite is locked."""
     with app.app_context():
@@ -15,10 +16,14 @@ def clear_expired_carts(max_retries=5, retry_delay=1):
                 expired_carts = Cart.query.filter(Cart.expires_at <= now).all()
 
                 if not expired_carts:
-                    print(f"✅ No expired carts found at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+                    print(
+                        f"✅ No expired carts found at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}"
+                    )
                     return
 
-                print(f"🧹 Found {len(expired_carts)} expired carts at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}. Cleaning up...")
+                print(
+                    f"🧹 Found {len(expired_carts)} expired carts at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}. Cleaning up..."
+                )
 
                 # Disable autoflush to avoid premature writes while looping
                 with db.session.no_autoflush:
@@ -28,7 +33,9 @@ def clear_expired_carts(max_retries=5, retry_delay=1):
                         db.session.delete(cart)
 
                 db.session.commit()
-                print(f"✅ Cleanup completed successfully at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+                print(
+                    f"✅ Cleanup completed successfully at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}"
+                )
                 return
 
             except OperationalError as e:
@@ -38,7 +45,10 @@ def clear_expired_carts(max_retries=5, retry_delay=1):
                 else:
                     raise  # Raise unexpected errors
 
-        print("❌ Failed to clear expired carts after several retries (DB remained locked).")
+        print(
+            "❌ Failed to clear expired carts after several retries (DB remained locked)."
+        )
+
 
 if __name__ == "__main__":
     clear_expired_carts()

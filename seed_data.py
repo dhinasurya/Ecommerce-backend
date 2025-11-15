@@ -5,7 +5,7 @@ with app.app_context():
     u1 = User(username="dhina", email="dhina@example.com")
     u2 = User(username="john_doe", email="john@example.com")
     u3 = User(username="alice_smith", email="alice@example.com")
-    
+
     # Products (variety of items and prices)
     p1 = Product(name="Laptop", price=80000, available_quantity=10)
     p2 = Product(name="Headphones", price=3000, available_quantity=50)

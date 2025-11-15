@@ -7,6 +7,8 @@ from flask_cors import CORS
 import os
 from dotenv import load_dotenv
 from flask_migrate import Migrate
+from bcrypt import hashpw, gensalt, checkpw
+from utils.jwt_utils import create_jwt
 
 load_dotenv()
 
@@ -19,6 +21,7 @@ CORS(app)
 # Configure your database URI
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SECRET_KEY"] = os.getenv("JWT_SECRET_KEY")
 
 # Initialize the database with the app
 db.init_app(app)
@@ -83,6 +86,77 @@ def get_or_create_active_cart(user_id):
 @app.route("/")
 def home():
     return jsonify({"message": "Welcome to the E-Commerce API"})
+
+
+# ---------------------------
+# AUTH
+# ---------------------------
+
+
+@app.route("/auth/register", methods=["POST"])
+def register():
+    data = request.get_json()
+    username = data.get("username")
+    email = data.get("email")
+    password = data.get("password")
+
+    if not username or not email or not password:
+        return jsonify({"error": "All fields are required"}), 400
+
+    # Check duplicates
+    if User.query.filter((User.username == username) | (User.email == email)).first():
+        return jsonify({"error": "User already exists"}), 409
+
+    # Hash password
+    hashed_pw = hashpw(password.encode("utf-8"), gensalt()).decode("utf-8")
+
+    new_user = User(username=username, email=email, password_hash=hashed_pw)
+    db.session.add(new_user)
+    db.session.commit()
+
+    token = create_jwt(new_user.id)
+
+    return (
+        jsonify(
+            {
+                "message": "User registered",
+                "token": token,
+                "user": {
+                    "id": new_user.id,
+                    "username": new_user.username,
+                    "email": new_user.email,
+                },
+            }
+        ),
+        201,
+    )
+
+
+@app.route("/auth/login", methods=["POST"])
+def login():
+    data = request.get_json()
+    username = data.get("username")
+    password = data.get("password")
+
+    if not username or not password:
+        return jsonify({"error": "Missing credentials"}), 400
+
+    user = User.query.filter_by(username=username).first()
+    if not user:
+        return jsonify({"error": "Invalid username or password"}), 401
+
+    if not checkpw(password.encode("utf-8"), user.password_hash.encode("utf-8")):
+        return jsonify({"error": "Invalid username or password"}), 401
+
+    token = create_jwt(user.id)
+
+    return jsonify(
+        {
+            "message": "Login successful",
+            "token": token,
+            "user": {"id": user.id, "username": user.username, "email": user.email},
+        }
+    )
 
 
 # ---------------------------

@@ -66,8 +66,17 @@ def get_or_create_active_cart(user_id):
     expired_cart = (
         Cart.query.filter_by(user_id=user_id).order_by(Cart.created_at.desc()).first()
     )
-    if expired_cart and expired_cart.expires_at <= now:
-        release_expired_cart(expired_cart)
+    
+    if expired_cart:
+        exp = expired_cart.expires_at
+
+        # Convert to IST-aware if naive
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=IST)
+
+        # If expired, release it
+        if exp <= now:
+            release_expired_cart(expired_cart)
 
     # 3. Create a new cart
     new_cart = Cart(user_id=user_id)

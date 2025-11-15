@@ -1,6 +1,10 @@
-dotenv
-flask
-flask_sqlalchemy
-psycopg2
-flask-cors
-tzdata
+bcrypt==5.0.0
+black==25.11.0
+dotenv==0.9.9
+Flask==3.1.2
+flask-cors==6.0.1
+Flask-Migrate==4.0.4
+Flask-SQLAlchemy==3.1.1
+psycopg2==2.9.11
+PyJWT==2.10.1
+tzdata==2025.2

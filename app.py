@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from flask_cors import CORS
 import os
 from dotenv import load_dotenv
+from flask_migrate import Migrate
 
 load_dotenv()
 
@@ -21,6 +22,7 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 # Initialize the database with the app
 db.init_app(app)
+migrate = Migrate(app, db)
 
 # Create all tables
 with app.app_context():

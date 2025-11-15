@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from database import db
+import bcrypt
 
 # Indian Standard Time
 IST = ZoneInfo("Asia/Kolkata")
@@ -12,11 +13,18 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), nullable=False, unique=True)
     email = db.Column(db.String(120), nullable=False, unique=True)
+    password_hash = db.Column(db.String(200), nullable=False)
 
     carts = db.relationship("Cart", back_populates="user", cascade="all, delete-orphan")
     orders = db.relationship(
         "Order", back_populates="user", cascade="all, delete-orphan"
     )
+
+    def set_password(self, password: str):
+        self.password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+    def check_password(self, password: str) -> bool:
+        return bcrypt.checkpw(password.encode(), self.password_hash.encode())
 
     def __repr__(self):
         return f"<User {self.username}>"

@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from flask_migrate import Migrate
 from bcrypt import hashpw, gensalt, checkpw
 from utils.jwt_utils import create_jwt
+from utils.auth_middleware import require_auth
 
 load_dotenv()
 
@@ -23,14 +24,12 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SECRET_KEY"] = os.getenv("JWT_SECRET_KEY")
 
+if not app.config["SECRET_KEY"]:
+    raise Exception("SECRET_KEY missing! Add it to .env")
+
 # Initialize the database with the app
 db.init_app(app)
 migrate = Migrate(app, db)
-
-# Create all tables
-with app.app_context():
-    db.create_all()
-    print("✅ Database tables created successfully!")
 
 
 # ---------------------------
@@ -159,6 +158,14 @@ def login():
     )
 
 
+@app.route("/auth/me", methods=["GET"])
+@require_auth
+def me():
+    user = User.query.get(request.user_id)
+
+    return jsonify({"id": user.id, "username": user.username, "email": user.email})
+
+
 # ---------------------------
 # PRODUCTS
 # ---------------------------
@@ -180,6 +187,7 @@ def get_products():
 
 
 @app.route("/products", methods=["POST"])
+@require_auth
 def add_product():
     data = request.get_json()
     name = data.get("name")
@@ -228,18 +236,20 @@ def list_users():
 # ---------------------------
 
 
-@app.route("/users/<int:user_id>/cart", methods=["POST"])
-def create_or_get_cart(user_id):
-    """Get or create active cart for a user."""
+@app.route("/cart", methods=["POST"])
+@require_auth
+def create_or_get_cart_route():
+    user_id = request.user_id
     cart, error = get_or_create_active_cart(user_id)
     if error:
         return jsonify({"error": error}), 404
-    return jsonify({"message": "✅ Active cart ready", "cart_id": cart.id}), 200
+    return jsonify({"message": "Active cart ready", "cart_id": cart.id}), 200
 
 
-@app.route("/users/<int:user_id>/cart/add", methods=["POST"])
-def add_to_cart(user_id):
-    """Add product to user's active cart."""
+@app.route("/cart/add", methods=["POST"])
+@require_auth
+def add_to_cart_route():
+    user_id = request.user_id
     data = request.get_json()
     product_id = data.get("product_id")
     quantity = data.get("quantity", 1)
@@ -251,25 +261,28 @@ def add_to_cart(user_id):
     product = Product.query.get(product_id)
     if not product:
         return jsonify({"error": "Product not found"}), 404
+
     if product.available_quantity < quantity:
         return jsonify({"error": "Not enough stock"}), 400
 
-    # Check if item exists in cart
     cart_item = CartItem.query.filter_by(cart_id=cart.id, product_id=product.id).first()
+
     if cart_item:
         cart_item.quantity += quantity
     else:
         cart_item = CartItem(cart_id=cart.id, product_id=product.id, quantity=quantity)
         db.session.add(cart_item)
 
-    # Decrement product availability
     product.available_quantity -= quantity
     db.session.commit()
-    return jsonify({"message": "✅ Item added to cart"}), 200
+
+    return jsonify({"message": "Item added"}), 200
 
 
-@app.route("/users/<int:user_id>/cart/remove", methods=["POST"])
-def remove_from_cart(user_id):
+@app.route("/cart/remove", methods=["POST"])
+@require_auth
+def remove_from_cart_route():
+    user_id = request.user_id
     data = request.get_json()
     product_id = data.get("product_id")
     quantity = data.get("quantity", 1)
@@ -284,23 +297,25 @@ def remove_from_cart(user_id):
 
     cart_item = CartItem.query.filter_by(cart_id=cart.id, product_id=product.id).first()
     if not cart_item:
-        return jsonify({"error": "Item not found in cart"}), 404
+        return jsonify({"error": "Item not in cart"}), 404
 
     if quantity >= cart_item.quantity:
         product.available_quantity += cart_item.quantity
         db.session.delete(cart_item)
-        message = "Item removed from cart"
+        message = "Item removed"
     else:
         cart_item.quantity -= quantity
         product.available_quantity += quantity
-        message = f"Reduced quantity by {quantity}"
+        message = f"Reduced by {quantity}"
 
     db.session.commit()
-    return jsonify({"message": f"✅ {message}"}), 200
+    return jsonify({"message": message}), 200
 
 
-@app.route("/users/<int:user_id>/cart", methods=["GET"])
-def view_user_cart(user_id):
+@app.route("/cart", methods=["GET"])
+@require_auth
+def view_cart_route():
+    user_id = request.user_id
     cart = get_active_cart(user_id)
 
     if not cart:
@@ -309,15 +324,14 @@ def view_user_cart(user_id):
             200,
         )
 
-    # same logic below
     now = datetime.now(IST)
     expires_at = cart.expires_at
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=IST)
 
     remaining = expires_at - now
-    remaining_minutes = int(remaining.total_seconds() // 60)
-    remaining_seconds = int(remaining.total_seconds() % 60)
+    minutes = int(remaining.total_seconds() // 60)
+    seconds = int(remaining.total_seconds() % 60)
 
     items = [
         {
@@ -335,17 +349,18 @@ def view_user_cart(user_id):
         {
             "items": items,
             "total": total,
-            "expires_in": f"{remaining_minutes}m {remaining_seconds}s",
+            "expires_in": f"{minutes}m {seconds}s",
             "expires_at": expires_at.isoformat(),
         }
     )
 
 
-@app.route("/users/<int:user_id>/cart/checkout", methods=["POST"])
-def checkout_cart(user_id):
+@app.route("/cart/checkout", methods=["POST"])
+@require_auth
+def checkout_route():
+    user_id = request.user_id
     now = datetime.now(IST)
 
-    # Get ACTIVE cart only — do NOT create a new cart
     cart = get_active_cart(user_id)
     if not cart:
         return jsonify({"error": "Cart expired"}), 410
@@ -353,15 +368,12 @@ def checkout_cart(user_id):
     if not cart.items:
         return jsonify({"error": "Cart is empty"}), 400
 
-    # Calculate total
     total_amount = sum(item.quantity * item.product.price for item in cart.items)
 
-    # Create order
     order = Order(user_id=user_id, total_amount=total_amount)
     db.session.add(order)
-    db.session.commit()  # Commit to generate order.id
+    db.session.commit()
 
-    # Move cart items to order items
     for item in cart.items:
         order_item = OrderItem(
             order_id=order.id,
@@ -371,22 +383,21 @@ def checkout_cart(user_id):
         )
         db.session.add(order_item)
 
-    # Delete cart (and cart items)
     db.session.delete(cart)
     db.session.commit()
 
-    return (
-        jsonify({"message": "✅ Order placed successfully", "order_id": order.id}),
-        200,
-    )
+    return jsonify({"message": "Order placed", "order_id": order.id}), 200
 
 
-@app.route("/users/<int:user_id>/orders", methods=["GET"])
-def get_user_orders(user_id):
-    """Fetch all orders for a specific user."""
-    user = User.query.get(user_id)
-    if not user:
-        return jsonify({"error": "User not found"}), 404
+# ---------------------------
+# ORDERS
+# ---------------------------
+
+
+@app.route("/orders", methods=["GET"])
+@require_auth
+def get_orders_route():
+    user_id = request.user_id
 
     orders = (
         Order.query.filter_by(user_id=user_id).order_by(Order.created_at.desc()).all()
@@ -396,24 +407,22 @@ def get_user_orders(user_id):
 
     result = []
     for order in orders:
-        order_data = {
-            "order_id": order.id,
-            "total_amount": order.total_amount,
-            "created_at": order.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-            "items": [],
-        }
-
-        for item in order.items:
-            order_data["items"].append(
-                {
-                    "product_name": item.product.name,
-                    "price_at_order": item.price_at_order,
-                    "quantity": item.quantity,
-                    "subtotal": item.quantity * item.price_at_order,
-                }
-            )
-
-        result.append(order_data)
+        result.append(
+            {
+                "order_id": order.id,
+                "total_amount": order.total_amount,
+                "created_at": order.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "items": [
+                    {
+                        "product_name": item.product.name,
+                        "price_at_order": item.price_at_order,
+                        "quantity": item.quantity,
+                        "subtotal": item.quantity * item.price_at_order,
+                    }
+                    for item in order.items
+                ],
+            }
+        )
 
     return jsonify(result)
 
@@ -423,6 +432,12 @@ def get_user_orders(user_id):
 # ---------------------------
 
 if __name__ == "__main__":
+    # Optionally create DB tables when running the script directly
+    if os.getenv("CREATE_DB") == "1":
+        with app.app_context():
+            db.create_all()
+            print("✅ Database tables created successfully!")
+
     # Bind to the hostname 'localhost' (instead of the default 127.0.0.1)
     # You can also use host='0.0.0.0' to listen on all interfaces.
     app.run(host="localhost", debug=True)

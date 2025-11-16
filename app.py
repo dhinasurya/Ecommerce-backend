@@ -308,17 +308,26 @@ def remove_from_cart_route():
     if not cart_item:
         return jsonify({"error": "Item not in cart"}), 404
 
+    # ---- Update or remove item ----
     if quantity >= cart_item.quantity:
         product.available_quantity += cart_item.quantity
         db.session.delete(cart_item)
-        message = "Item removed"
+        action_msg = "Item removed"
     else:
         cart_item.quantity -= quantity
         product.available_quantity += quantity
-        message = f"Reduced by {quantity}"
+        action_msg = f"Reduced by {quantity}"
 
     db.session.commit()
-    return jsonify({"message": message}), 200
+
+    # ---- NEW: Delete cart if empty ----
+    # Note: refresh the relationship after commit
+    if len(cart.items) == 0:
+        db.session.delete(cart)
+        db.session.commit()
+        return jsonify({"message": "Cart is now empty and has been removed"}), 200
+
+    return jsonify({"message": action_msg}), 200
 
 
 @app.route("/cart", methods=["GET"])

@@ -8,7 +8,11 @@ import os
 from dotenv import load_dotenv
 from flask_migrate import Migrate
 from bcrypt import hashpw, gensalt, checkpw
-from utils.jwt_utils import create_jwt
+from utils.jwt_utils import (
+    create_access_token,
+    create_refresh_token,
+    decode_refresh_token,
+)
 from utils.auth_middleware import require_auth
 
 load_dotenv()
@@ -22,7 +26,9 @@ CORS(app)
 # Configure your database URI
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["SECRET_KEY"] = os.getenv("JWT_SECRET_KEY")
+app.config["SECRET_KEY"] = os.getenv("ACCESS_SECRET_KEY")
+app.config["REFRESH_SECRET_KEY"] = os.getenv("REFRESH_SECRET_KEY")
+
 
 if not app.config["SECRET_KEY"]:
     raise Exception("SECRET_KEY missing! Add it to .env")
@@ -66,7 +72,7 @@ def get_or_create_active_cart(user_id):
     expired_cart = (
         Cart.query.filter_by(user_id=user_id).order_by(Cart.created_at.desc()).first()
     )
-    
+
     if expired_cart:
         exp = expired_cart.expires_at
 
@@ -111,33 +117,42 @@ def register():
     if not username or not email or not password:
         return jsonify({"error": "All fields are required"}), 400
 
-    # Check duplicates
     if User.query.filter((User.username == username) | (User.email == email)).first():
         return jsonify({"error": "User already exists"}), 409
 
-    # Hash password
     hashed_pw = hashpw(password.encode("utf-8"), gensalt()).decode("utf-8")
 
     new_user = User(username=username, email=email, password_hash=hashed_pw)
     db.session.add(new_user)
     db.session.commit()
 
-    token = create_jwt(new_user.id)
+    access = create_access_token(new_user.id)
+    refresh = create_refresh_token(new_user.id)
 
-    return (
-        jsonify(
-            {
-                "message": "User registered",
-                "token": token,
-                "user": {
-                    "id": new_user.id,
-                    "username": new_user.username,
-                    "email": new_user.email,
-                },
-            }
-        ),
-        201,
+    response = jsonify(
+        {
+            "message": "User registered",
+            "access_token": access,
+            "user": {
+                "id": new_user.id,
+                "username": new_user.username,
+                "email": new_user.email,
+            },
+        }
     )
+
+    # Send refresh token as httpOnly cookie
+    response.set_cookie(
+        "refresh_token",
+        refresh,
+        httponly=True,
+        secure=False,  # True in production
+        samesite="Strict",
+        max_age=7 * 24 * 60 * 60,
+        path="/",
+    )
+
+    return response, 201
 
 
 @app.route("/auth/login", methods=["POST"])
@@ -156,15 +171,51 @@ def login():
     if not checkpw(password.encode("utf-8"), user.password_hash.encode("utf-8")):
         return jsonify({"error": "Invalid username or password"}), 401
 
-    token = create_jwt(user.id)
+    access = create_access_token(user.id)
+    refresh = create_refresh_token(user.id)
 
-    return jsonify(
+    response = jsonify(
         {
             "message": "Login successful",
-            "token": token,
+            "access_token": access,
             "user": {"id": user.id, "username": user.username, "email": user.email},
         }
     )
+    # Set refresh cookie (HTTP-only)
+    response.set_cookie(
+        "refresh_token",
+        refresh,
+        httponly=True,
+        secure=False,  # True in production (HTTPS only)
+        samesite="Strict",
+        max_age=7 * 24 * 60 * 60,
+        path="/",
+    )
+
+    return response
+
+
+@app.route("/auth/refresh", methods=["POST"])
+def refresh():
+    refresh_token = request.cookies.get("refresh_token")
+    if not refresh_token:
+        return jsonify({"error": "Missing refresh token"}), 401
+
+    try:
+        payload = decode_refresh_token(refresh_token)
+        user_id = payload["user_id"]
+    except:
+        return jsonify({"error": "Invalid or expired refresh token"}), 401
+
+    new_access = create_access_token(user_id)
+    return jsonify({"access_token": new_access})
+
+
+@app.route("/auth/logout", methods=["POST"])
+def logout():
+    response = jsonify({"message": "Logged out"})
+    response.set_cookie("refresh_token", "", expires=0)
+    return response
 
 
 @app.route("/auth/me", methods=["GET"])

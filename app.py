@@ -21,7 +21,7 @@ IST = ZoneInfo("Asia/Kolkata")
 
 app = Flask(__name__)
 
-CORS(app)
+CORS(app, supports_credentials=True)
 
 # Configure your database URI
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
